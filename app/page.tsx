@@ -153,23 +153,13 @@ export default function Home() {
             <main className="w-full h-screen bg-zinc-200">
               <div className="w-full h-full flex flex-row">
                 <div className={"w-2/3 items-center justify-center flex flex-col"}>
-                  <p className={"text-6xl font-bold mb-16 text-center"}><span className={"text-gray-900"}>Good evening</span>, <span
+                  <p className={"text-6xl font-bold mb-16 text-center"}><span
+                      className={"text-gray-900"}>Good evening</span>, <span
                       className={"text-green-700"}>{profile?.first_name}</span>. What's on your mind?</p>
                   <Spotify link={playlistUrl} className={"w-3/6 h-4/6"}/>
                 </div>
                 <div className={"w-1/3 items-center justify-center flex"}>
-                  {movies.map((movie) => (
-                      <div key={movie.link} className="w-full md:w-1/3 lg:w-1/4 rounded-lg shadow-md overflow-hidden">
-                        <img src={movie.image} alt={movie.description} className="w-full h-48 object-cover" />
-                        <div className="p-4">
-                          <h3 className="text-lg font-medium text-gray-900">{movie.description ? movie.description : "No description available"}</h3>
-                          <a href={movie.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800">
-                            View on IMDB
-                          </a>
-                        </div>
-                      </div>
-                  ))}
-
+                  <p>No activities recommended for now. Your condition looks optimal :)</p>
                 </div>
                 <div className='flex flex-col gap-2 w-[23rem] h-96 overflow-y-auto snap-y'>
                   {/* Render chat history */}
@@ -192,7 +182,7 @@ export default function Home() {
         )}
       </div>
   )
-  ;
+      ;
 }
 
 Home.requireAuth = true;
