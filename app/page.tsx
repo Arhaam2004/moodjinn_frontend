@@ -1,113 +1,198 @@
+'use client'
+
 import Image from "next/image";
+import {signIn, useSession} from "next-auth/react";
+import {redirect} from "next/navigation"
+import {collection, getDocs, query, where} from "@firebase/firestore";
+import {db} from "@/firebase.config";
+import {LegacyRef, useEffect, useRef, useState} from "react";
+import Webcam from "react-webcam"
+import {Button} from "@/components/ui/button";
+import axios from "axios";
+import SpotifyProvider from "next-auth/providers/spotify";
+import {Spotify} from "react-spotify-embed";
+import {sendMessage, initializeChat} from "@/helpers/gemini";
+import Chatbot from "@/components/Chatbot";
+
+
+interface UserProfile{
+  email: string;
+  first_name: string;
+  last_name: string;
+  age: number;
+  uid: string;
+  spotify_connected: boolean;
+  spotify_access: string;
+  spotify_refresh: string;
+}
+
+interface Movie {
+  link: string;
+  image: string;
+  description: string;
+}
+
 
 export default function Home() {
+
+  const [spotifyId, setSpotifyId] = useState<string>()
+  const [profile, setProfile] = useState<UserProfile | null>(null)
+  const webcamRef = useRef<any>();
+  const [playlistUrl, setPlaylistUrl] = useState<string | null>(null);
+  const [movies, setMovies] = useState<Movie[]>([]);
+
+
+  const session = useSession({
+    required: true,
+    onUnauthenticated() {
+      redirect('/signin')
+    }
+  })
+
+  async function spotifyProfile(accessToken: string | undefined) {
+
+    const response = await fetch('https://api.spotify.com/v1/me', {
+      headers: {
+        Authorization: 'Bearer ' + accessToken
+      }
+    });
+
+    const data = await response.json();
+    console.log(data);
+    console.log(data.id)
+    setSpotifyId(data.id)
+  }
+
+  async function sendMovieRequest(mood: string) {
+    try {
+      const response = await axios.post<Movie[]>('http://localhost:8000/api/movies/', { mood });
+      setMovies(response.data); // Update movies state with response data
+      return response.data;
+    } catch (error) {
+      console.error('Error sending movie request:', error);
+      throw error;
+    }
+  }
+
+
+  async function getProfile() {
+    const q = query(collection(db, "users"), where("email", "==", session.data?.user?.email));
+
+    const querySnapshot = await getDocs(q);
+    querySnapshot.forEach((doc) => {
+      // doc.data() is never undefined for query doc snapshots
+      console.log(doc.id, " => ", doc.data());
+      setProfile(doc.data() as UserProfile)
+
+    });
+  }
+
+  async function getSpotifyData(accessToken: string | undefined, mood: string) {
+    try {
+      const day = getCurrentDayOfWeek()
+      const response = await axios.post('http://localhost:8000/api/spotify-data/', {
+        access_token: accessToken,
+        user_id: spotifyId,
+        name: profile?.first_name + "'s " + day + " Mood Playlist",
+        mood: mood
+      });
+      console.log(response.data.url);
+      setPlaylistUrl(response.data.url);
+
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching Spotify data:', error);
+      throw error;
+    }
+  }
+
+
+  async function getMood(){
+    console.log("got here")
+    if(webcamRef.current!==null) {
+      let response = await axios.post(`http://localhost:8000/api/post-image/`, {
+        image: webcamRef.current.getScreenshot(),
+        token: localStorage.getItem("token"),
+      });
+      let songs = response.data.songs;
+      let resMood = response.data.mood;
+      console.log(resMood);
+      getSpotifyData(profile?.spotify_access, resMood)
+      sendMovieRequest(resMood);
+    }
+  }
+
+  function getCurrentDayOfWeek() {
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    return daysOfWeek[dayOfWeek];
+  }
+
+  useEffect(()=>{
+    if(session.data?.user?.email!=undefined){
+      getProfile();
+    }
+  },[session])
+
+  useEffect(() => {
+    if(profile){
+      console.log(profile)
+      spotifyProfile(profile.spotify_access)
+    }
+  }, [profile]);
+
+  console.log(session.data)
+
+
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <div className="z-10 w-full max-w-5xl items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Get started by editing&nbsp;
-          <code className="font-mono font-bold">app/page.tsx</code>
-        </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:size-auto lg:bg-none">
-          <a
-            className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0"
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{" "}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className="dark:invert"
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
-        </div>
+      <div>
+        {playlistUrl!==null ? (
+            // Second part: Render this if playlistUrl is not null
+            <main className="w-full h-screen bg-zinc-200">
+              <div className="w-full h-full flex flex-row">
+                <div className={"w-2/3 items-center justify-center flex flex-col"}>
+                  <p className={"text-6xl font-bold mb-16 text-center"}><span className={"text-gray-900"}>Good evening</span>, <span
+                      className={"text-green-700"}>{profile?.first_name}</span>. What's on your mind?</p>
+                  <Spotify link={playlistUrl} className={"w-3/6 h-4/6"}/>
+                </div>
+                <div className={"w-1/3 items-center justify-center flex"}>
+                  {movies.map((movie) => (
+                      <div key={movie.link} className="w-full md:w-1/3 lg:w-1/4 rounded-lg shadow-md overflow-hidden">
+                        <img src={movie.image} alt={movie.description} className="w-full h-48 object-cover" />
+                        <div className="p-4">
+                          <h3 className="text-lg font-medium text-gray-900">{movie.description ? movie.description : "No description available"}</h3>
+                          <a href={movie.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800">
+                            View on IMDB
+                          </a>
+                        </div>
+                      </div>
+                  ))}
+
+                </div>
+                <div className='flex flex-col gap-2 w-[23rem] h-96 overflow-y-auto snap-y'>
+                  {/* Render chat history */}
+
+                </div>
+              </div>
+            </main>
+        ) : (
+            // First part: Render this if playlistUrl is null
+            <main className="w-full h-screen bg-neutral-300">
+              <div className="w-full h-full flex flex-col">
+                <div className={"w-3/3 items-center justify-center flex flex-col"}>
+                  <Webcam ref={webcamRef} className={""}/>
+
+                  <Button onClick={getMood}>Get Mood</Button>
+                </div>
+
+              </div>
+            </main>
+        )}
       </div>
-
-      <div className="relative z-[-1] flex place-items-center before:absolute before:h-[300px] before:w-full before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-full after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700 before:dark:opacity-10 after:dark:from-sky-900 after:dark:via-[#0141ff] after:dark:opacity-40 sm:before:w-[480px] sm:after:w-[240px] before:lg:h-[360px]">
-        <Image
-          className="relative dark:drop-shadow-[0_0_0.3rem_#ffffff70] dark:invert"
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
-        />
-      </div>
-
-      <div className="mb-32 grid text-center lg:mb-0 lg:w-full lg:max-w-5xl lg:grid-cols-4 lg:text-left">
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Docs{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Find in-depth information about Next.js features and API.
-          </p>
-        </a>
-
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Learn{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Learn about Next.js in an interactive course with&nbsp;quizzes!
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Templates{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Explore starter templates for Next.js.
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Deploy{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-balance text-sm opacity-50">
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
-      </div>
-    </main>
-  );
+  )
+  ;
 }
+
+Home.requireAuth = true;
